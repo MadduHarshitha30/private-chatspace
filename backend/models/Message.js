@@ -14,9 +14,16 @@ const messageSchema = new mongoose.Schema({
     message: {
         type: String,
         required: true
+    },
+    hiddenFor: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
+    deletedForEveryone: {
+        type: Boolean,
+        default: false
     }
 }, { timestamps: true });
 
 const Message = mongoose.model('Message', messageSchema);
-
 module.exports = Message;

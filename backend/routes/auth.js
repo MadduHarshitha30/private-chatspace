@@ -2,7 +2,13 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const authMiddleware = require('../middleware/authMiddleware');
 const router = express.Router();
+
+const allowedAvatars = Array.from(
+    { length: 15 },
+    (_, index) => `/avatars/avatar-${String(index + 1).padStart(2, '0')}.png`
+);
 
 router.post('/register', async (req, res) => {
     try {
@@ -35,7 +41,8 @@ router.post('/register', async (req, res) => {
             user: {
                 id: user._id,
                 username: user.username,
-                email: user.email
+                email: user.email,
+                avatar: user.avatar
             }
         });
     } catch (error) {
@@ -71,11 +78,44 @@ router.post('/login', async (req, res) => {
             user: {
                 id: user._id,
                 username: user.username,
-                email: user.email
+                email: user.email,
+                avatar: user.avatar || '/avatars/avatar-01.png'
             }
         });
     } catch (error) {
         res.status(500).json({ message: 'Login failed' });
+    }
+});
+
+router.put('/avatar', authMiddleware, async (req, res) => {
+    try {
+        const { avatar } = req.body;
+
+        if (!allowedAvatars.includes(avatar)) {
+            return res.status(400).json({ message: 'Invalid avatar selection' });
+        }
+
+        const user = await User.findByIdAndUpdate(
+            req.userId,
+            { avatar },
+            { new: true }
+        ).select('username email avatar');
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({
+            message: 'Avatar updated successfully',
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                avatar: user.avatar
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to update avatar' });
     }
 });
 

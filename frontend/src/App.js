@@ -2,7 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import './App.css';
 
-const API = 'https://private-chatspace.onrender.com';
+const API = 'http://localhost:5000';
+
+const avatars = Array.from(
+    { length: 15 },
+    (_, index) => `/avatars/avatar-${String(index + 1).padStart(2, '0')}.png`
+);
+
+const LEGACY_DEFAULT_AVATAR = avatars[0];
+const DEFAULT_AVATAR = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="50" fill="%23E5E7EB"/%3E%3Ccircle cx="50" cy="37" r="17" fill="%239CA3AF"/%3E%3Cpath d="M17 91c3-20 16-31 33-31s30 11 33 31" fill="%239CA3AF"/%3E%3C/svg%3E';
+
+const getAvatar = (avatar) =>
+    !avatar || avatar === LEGACY_DEFAULT_AVATAR ? DEFAULT_AVATAR : avatar;
 
 function App() {
     const [token, setToken] = useState(localStorage.getItem('token') || '');
@@ -21,6 +32,13 @@ function App() {
     const [unreadCounts, setUnreadCounts] = useState({});
     const [socket, setSocket] = useState(null);
     const [error, setError] = useState('');
+    const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+    const [selectedAvatar, setSelectedAvatar] = useState(
+        currentUser?.avatar && currentUser.avatar !== LEGACY_DEFAULT_AVATAR
+            ? currentUser.avatar
+            : avatars[0]
+    );
+    const [savingAvatar, setSavingAvatar] = useState(false);
 
     const handleAuth = async (e) => {
         e.preventDefault();
@@ -55,11 +73,21 @@ function App() {
                 return;
             }
 
+            const loggedInUser = {
+                ...data.user,
+                avatar: data.user.avatar || LEGACY_DEFAULT_AVATAR
+            };
+
             localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
+            localStorage.setItem('user', JSON.stringify(loggedInUser));
 
             setToken(data.token);
-            setCurrentUser(data.user);
+            setCurrentUser(loggedInUser);
+            setSelectedAvatar(
+                loggedInUser.avatar === LEGACY_DEFAULT_AVATAR
+                    ? avatars[0]
+                    : loggedInUser.avatar
+            );
         } catch (error) {
             setError('Cannot connect to server');
         }
@@ -169,6 +197,95 @@ function App() {
         }));
     };
 
+    const deleteChat = async (user) => {
+        const confirmed = window.confirm(
+            `Are you sure you want to delete your chat with ${user.username}? This will only delete it from your account.`
+        );
+
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch(
+                `${API}/api/chat/messages/${user._id}`,
+                {
+                    method: 'DELETE',
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                window.alert(data.message || 'Failed to delete chat');
+                return;
+            }
+
+            if (selectedUser?._id === user._id) {
+                setSelectedUser(null);
+                setMessages([]);
+            }
+
+            setUnreadCounts((prev) => {
+                const updated = { ...prev };
+                delete updated[user._id];
+                return updated;
+            });
+
+            window.alert('Chat deleted successfully!');
+        } catch (error) {
+            window.alert('Cannot connect to server');
+        }
+    };
+
+    const openAvatarPicker = () => {
+        setSelectedAvatar(
+            currentUser?.avatar && currentUser.avatar !== LEGACY_DEFAULT_AVATAR
+                ? currentUser.avatar
+                : avatars[0]
+        );
+        setShowAvatarPicker(true);
+    };
+
+    const saveAvatar = async () => {
+        setSavingAvatar(true);
+
+        try {
+            const response = await fetch(`${API}/api/auth/avatar`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ avatar: selectedAvatar })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                window.alert(data.message || 'Failed to update avatar');
+                return;
+            }
+
+            const updatedUser = {
+                ...currentUser,
+                ...data.user,
+                id: data.user.id || currentUser.id
+            };
+
+            setCurrentUser(updatedUser);
+            localStorage.setItem('user', JSON.stringify(updatedUser));
+            setShowAvatarPicker(false);
+
+            window.alert('Profile avatar updated successfully!');
+        } catch (error) {
+            window.alert('Cannot connect to server');
+        } finally {
+            setSavingAvatar(false);
+        }
+    };
+
     const logout = () => {
         if (socket) socket.disconnect();
 
@@ -182,6 +299,7 @@ function App() {
         setUsers([]);
         setSocket(null);
         setUnreadCounts({});
+        setShowAvatarPicker(false);
     };
 
     if (!token) {
@@ -241,7 +359,23 @@ function App() {
             <aside className="users-panel">
                 <div className="users-header">
                     <h2>ChatSpace 💬</h2>
-                    <p>Welcome, {currentUser?.username}</p>
+
+                    <div className="my-profile">
+                        <img
+                            src={getAvatar(currentUser?.avatar)}
+                            alt="My avatar"
+                            className="my-avatar"
+                        />
+
+                        <p>Welcome, {currentUser?.username}</p>
+                    </div>
+
+                    <button
+                        className="customize-profile-button"
+                        onClick={openAvatarPicker}
+                    >
+                        Customize Profile
+                    </button>
                 </div>
 
                 <h3>People</h3>
@@ -255,12 +389,31 @@ function App() {
                         <span>
                             {onlineUsers.includes(user._id) ? '🟢' : '⚪'}
                         </span>
+
+                        <img
+                            src={getAvatar(user.avatar)}
+                            alt={`${user.username}'s avatar`}
+                            className="user-avatar"
+                        />
+
                         <span className="user-name">{user.username}</span>
+
                         {unreadCounts[user._id] > 0 && (
                             <span className="unread-badge">
                                 {unreadCounts[user._id]}
                             </span>
                         )}
+
+                        <button
+                            className="delete-chat-button"
+                            title="Delete chat"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                deleteChat(user);
+                            }}
+                        >
+                            🗑️
+                        </button>
                     </div>
                 ))}
 
@@ -273,12 +426,20 @@ function App() {
                 {selectedUser ? (
                     <>
                         <div className="private-header">
-                            <h2>{selectedUser.username}</h2>
-                            <p>
-                                {onlineUsers.includes(selectedUser._id)
-                                    ? 'Online'
-                                    : 'Offline'}
-                            </p>
+                            <img
+                                src={getAvatar(selectedUser.avatar)}
+                                alt={`${selectedUser.username}'s avatar`}
+                                className="chat-header-avatar"
+                            />
+
+                            <div>
+                                <h2>{selectedUser.username}</h2>
+                                <p>
+                                    {onlineUsers.includes(selectedUser._id)
+                                        ? 'Online'
+                                        : 'Offline'}
+                                </p>
+                            </div>
                         </div>
 
                         <div className="private-messages">
@@ -315,6 +476,52 @@ function App() {
                     </div>
                 )}
             </main>
+
+            {showAvatarPicker && (
+                <div
+                    className="avatar-modal-overlay"
+                    onClick={() => setShowAvatarPicker(false)}
+                >
+                    <div
+                        className="avatar-modal"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            className="close-avatar-modal"
+                            onClick={() => setShowAvatarPicker(false)}
+                        >
+                            ×
+                        </button>
+
+                        <h2>Customize Your Profile</h2>
+                        <p>Choose your favorite 3D avatar</p>
+
+                        <div className="avatar-preview">
+                            <img src={selectedAvatar} alt="Selected avatar" />
+                        </div>
+
+                        <div className="avatar-gallery">
+                            {avatars.map((avatar) => (
+                                <button
+                                    key={avatar}
+                                    className={`avatar-option ${selectedAvatar === avatar ? 'selected' : ''}`}
+                                    onClick={() => setSelectedAvatar(avatar)}
+                                >
+                                    <img src={avatar} alt="Avatar option" />
+                                </button>
+                            ))}
+                        </div>
+
+                        <button
+                            className="save-avatar-button"
+                            onClick={saveAvatar}
+                            disabled={savingAvatar}
+                        >
+                            {savingAvatar ? 'Saving...' : 'Save Avatar'}
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
