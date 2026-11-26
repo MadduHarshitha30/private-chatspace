@@ -9,7 +9,7 @@ router.get('/users', authMiddleware, async (req, res) => {
     try {
         const users = await User.find({
             _id: { $ne: req.userId }
-        }).select('username email');
+        }).select('username email avatar');
 
         res.json(users);
     } catch (error) {
